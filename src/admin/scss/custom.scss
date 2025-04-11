@@ -1,0 +1,49 @@
+/* 
+  Custom Admin Styles for Payload CMS
+  This file overrides the default dark theme colors to use pure black backgrounds
+*/
+
+/* Target dark theme specifically */
+[data-theme="dark"] {
+  /* Main background colors */
+  --theme-elevation-0: #000000;
+  --theme-elevation-50: #080808;
+  --theme-elevation-100: #101010;
+  --theme-elevation-150: #181818;
+  --theme-elevation-200: #202020;
+  
+  /* Ensure login page has pure black background */
+  &.payload-template-login {
+    background-color: #000000;
+  }
+  
+  /* Make sure the main content area has pure black background */
+  .template-default__wrap {
+    background-color: #000000;
+  }
+  
+  /* Ensure sidebar has pure black background */
+  .nav {
+    background-color: #000000;
+  }
+  
+  /* Improve visibility of buttons on pure black */
+  .btn {
+    background-color: #101010;
+  }
+  
+  /* Make sure form fields have proper contrast */
+  input, textarea, select {
+    background-color: #101010;
+  }
+}
+
+/* Additional login page styling */
+.template-login {
+  background-color: #000000;
+}
+
+/* Ensure proper contrast for text on black backgrounds */
+.template-default__wrap {
+  color: #ffffff;
+}

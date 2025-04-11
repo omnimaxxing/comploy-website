@@ -1,0 +1,153 @@
+name: Accessibility Testing
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'public/**'
+
+jobs:
+  a11y:
+    name: Accessibility Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          
+      - name: Setup PNPM
+        uses: pnpm/action-setup@v2
+        with:
+          version: '10'
+          run_install: false
+          
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+          
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+            
+      - name: Install dependencies
+        run: pnpm install
+        
+      - name: Build Next.js app
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_SERVER_URL: http://localhost:3000
+          PAYLOAD_SECRET: test-secret-for-ci
+          DATABASE_URI: mongodb://localhost:27017/test
+          
+      - name: Start server in background
+        run: |
+          pnpm start &
+          sleep 10
+        env:
+          NEXT_PUBLIC_SERVER_URL: http://localhost:3000
+          PAYLOAD_SECRET: test-secret-for-ci
+          DATABASE_URI: mongodb://localhost:27017/test
+          
+      - name: Run accessibility tests
+        id: a11y_test
+        run: |
+          npm install -g pa11y-ci
+          mkdir -p ./a11y-reports
+          
+          # Create pa11y config
+          cat > .pa11yci.json << EOF
+          {
+            "defaults": {
+              "timeout": 60000,
+              "wait": 2000,
+              "standard": "WCAG2AA",
+              "reporters": ["cli", "json"],
+              "chromeLaunchConfig": {
+                "args": ["--no-sandbox", "--disable-dev-shm-usage"]
+              }
+            },
+            "urls": [
+              "http://localhost:3000/",
+              "http://localhost:3000/plugins",
+              "http://localhost:3000/plugins/all"
+            ]
+          }
+          EOF
+          
+          # Run pa11y and save results
+          pa11y-ci --json > ./a11y-reports/results.json || true
+          
+          # Format results for PR comment
+          node -e '
+            const fs = require("fs");
+            const results = JSON.parse(fs.readFileSync("./a11y-reports/results.json", "utf8"));
+            
+            let comment = "## Accessibility Audit Results\n\n";
+            let totalIssues = 0;
+            
+            for (const url in results.results) {
+              const pageResults = results.results[url];
+              const issues = pageResults.issues || [];
+              totalIssues += issues.length;
+              
+              comment += `### ${url}\n`;
+              comment += `Found ${issues.length} issues\n\n`;
+              
+              if (issues.length > 0) {
+                comment += "| Code | Message | Element |\n";
+                comment += "|------|---------|--------|\n";
+                
+                issues.slice(0, 5).forEach(issue => {
+                  const element = issue.selector ? `\`${issue.selector}\`` : "N/A";
+                  comment += `| ${issue.code} | ${issue.message} | ${element} |\n`;
+                });
+                
+                if (issues.length > 5) {
+                  comment += `\n... and ${issues.length - 5} more issues\n`;
+                }
+              } else {
+                comment += "✅ No accessibility issues found\n";
+              }
+              
+              comment += "\n";
+            }
+            
+            comment += `\n**Total issues found: ${totalIssues}**\n`;
+            comment += totalIssues === 0 ? 
+              "✅ Great job! Your PR passes all accessibility checks." : 
+              "⚠️ Please fix these accessibility issues before merging.";
+            
+            fs.writeFileSync("./a11y-reports/comment.md", comment);
+          '
+          
+      - name: Upload accessibility reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: accessibility-reports
+          path: ./a11y-reports
+          
+      - name: Comment PR with accessibility results
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const comment = fs.readFileSync('./a11y-reports/comment.md', 'utf8');
+            
+            const { issue: { number: issue_number }, repo: { owner, repo } } = context;
+            github.rest.issues.createComment({
+              issue_number,
+              owner,
+              repo,
+              body: comment
+            });

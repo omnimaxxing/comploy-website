@@ -1,0 +1,250 @@
+name: Dependency Updates
+
+on:
+  schedule:
+    - cron: '0 0 * * 1' # Run weekly on Mondays
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  dependency-update:
+    name: Check & Update Dependencies
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          
+      - name: Setup PNPM
+        uses: pnpm/action-setup@v2
+        with:
+          version: '10'
+          run_install: false
+          
+      - name: Install Renovate
+        run: npm install -g renovate
+        
+      - name: Run Renovate
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RENOVATE_CONFIG_FILE: .github/renovate-config.json
+        run: |
+          # Create Renovate config if it doesn't exist
+          mkdir -p .github
+          cat > .github/renovate-config.json << EOF
+          {
+            "extends": [
+              "config:base"
+            ],
+            "packageRules": [
+              {
+                "matchUpdateTypes": ["minor", "patch"],
+                "matchCurrentVersion": "!/^0/",
+                "automerge": true
+              },
+              {
+                "matchDepTypes": ["devDependencies"],
+                "matchUpdateTypes": ["minor", "patch"],
+                "groupName": "dev dependencies (non-major)",
+                "groupSlug": "dev-dependencies"
+              },
+              {
+                "matchPackagePatterns": ["^@next", "^next"],
+                "groupName": "Next.js packages",
+                "groupSlug": "nextjs"
+              },
+              {
+                "matchPackagePatterns": ["^@payload", "payload"],
+                "groupName": "Payload CMS packages",
+                "groupSlug": "payload"
+              }
+            ],
+            "prHourlyLimit": 2,
+            "prConcurrentLimit": 5,
+            "rangeStrategy": "bump",
+            "semanticCommits": "enabled",
+            "dependencyDashboard": true,
+            "dependencyDashboardTitle": "Dependency Dashboard",
+            "labels": ["dependencies"]
+          }
+          EOF
+          
+          renovate OmniPixel-LLC/PayloadPlugins
+          
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          
+      - name: Setup PNPM
+        uses: pnpm/action-setup@v2
+        with:
+          version: '10'
+          run_install: false
+          
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+          
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+            
+      - name: Install dependencies
+        run: pnpm install
+        
+      - name: Run security audit
+        run: pnpm audit --json > security-audit.json || true
+        
+      - name: Process audit results
+        id: process_audit
+        run: |
+          node -e '
+            const fs = require("fs");
+            let auditData;
+            
+            try {
+              auditData = JSON.parse(fs.readFileSync("security-audit.json", "utf8"));
+            } catch (e) {
+              console.log("No vulnerabilities found or error parsing audit results");
+              process.exit(0);
+            }
+            
+            // Extract vulnerabilities
+            const vulnerabilities = auditData.vulnerabilities || {};
+            const vulnEntries = Object.entries(vulnerabilities);
+            
+            if (vulnEntries.length === 0) {
+              fs.writeFileSync("security-report.md", "## Security Audit Results\n\n✅ No vulnerabilities found!");
+              process.exit(0);
+            }
+            
+            // Count severity levels
+            const severityCounts = {
+              critical: 0,
+              high: 0,
+              moderate: 0,
+              low: 0
+            };
+            
+            vulnEntries.forEach(([pkg, info]) => {
+              const severity = info.severity;
+              if (severityCounts[severity] !== undefined) {
+                severityCounts[severity]++;
+              }
+            });
+            
+            // Generate report
+            let report = "## Security Audit Results\n\n";
+            
+            report += "### Summary\n\n";
+            report += "| Severity | Count |\n";
+            report += "|----------|-------|\n";
+            Object.entries(severityCounts).forEach(([severity, count]) => {
+              report += `| ${severity.charAt(0).toUpperCase() + severity.slice(1)} | ${count} |\n`;
+            });
+            
+            report += "\n### Details\n\n";
+            
+            // Sort by severity (critical first)
+            const severityOrder = { critical: 0, high: 1, moderate: 2, low: 3 };
+            vulnEntries
+              .sort((a, b) => severityOrder[a[1].severity] - severityOrder[b[1].severity])
+              .slice(0, 10) // Limit to 10 vulnerabilities
+              .forEach(([pkg, info]) => {
+                report += `#### ${pkg}\n\n`;
+                report += `- **Severity**: ${info.severity}\n`;
+                report += `- **Via**: ${info.via.map(v => typeof v === "string" ? v : v.name).join(", ")}\n`;
+                if (info.effects && info.effects.length > 0) {
+                  report += `- **Affects**: ${info.effects.join(", ")}\n`;
+                }
+                report += `- **Fix available**: ${info.fixAvailable ? "Yes" : "No"}\n`;
+                if (info.url) {
+                  report += `- **More info**: [${info.url}](${info.url})\n`;
+                }
+                report += "\n";
+              });
+            
+            if (vulnEntries.length > 10) {
+              report += `\n... and ${vulnEntries.length - 10} more vulnerabilities\n`;
+            }
+            
+            report += "\n### Recommendations\n\n";
+            
+            if (severityCounts.critical > 0 || severityCounts.high > 0) {
+              report += "⚠️ **Action required**: Critical or high severity vulnerabilities detected. Please update affected dependencies as soon as possible.\n";
+            } else if (severityCounts.moderate > 0) {
+              report += "⚠️ **Consider updating**: Moderate vulnerabilities detected. Consider updating affected dependencies.\n";
+            } else {
+              report += "✅ **Low risk**: Only low severity vulnerabilities detected. Update at your convenience.\n";
+            }
+            
+            fs.writeFileSync("security-report.md", report);
+          '
+          
+      - name: Create or update security issue
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require("fs");
+            
+            try {
+              const reportContent = fs.readFileSync("security-report.md", "utf8");
+              
+              // Check for existing open security issue
+              const { data: issues } = await github.rest.issues.listForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: "open",
+                labels: ["security"]
+              });
+              
+              const securityIssue = issues.find(issue => 
+                issue.title.includes("Security Vulnerabilities Report")
+              );
+              
+              const issueBody = `${reportContent}\n\n---\n*This is an automated security report generated on ${new Date().toISOString().split("T")[0]}*`;
+              
+              if (securityIssue) {
+                // Update existing issue
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: securityIssue.number,
+                  body: issueBody
+                });
+                console.log(`Updated security issue #${securityIssue.number}`);
+              } else if (reportContent.includes("Action required") || reportContent.includes("Consider updating")) {
+                // Only create new issue if there are vulnerabilities to fix
+                const { data: newIssue } = await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: "Security Vulnerabilities Report",
+                  body: issueBody,
+                  labels: ["security", "dependencies"]
+                });
+                console.log(`Created security issue #${newIssue.number}`);
+              } else {
+                console.log("No significant vulnerabilities found, skipping issue creation");
+              }
+            } catch (error) {
+              console.error("Error processing security report:", error);
+            }

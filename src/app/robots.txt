@@ -1,0 +1,44 @@
+# Omnipixel.io Robots.txt
+# Updated: 2024
+
+# Allow all robots full access by default
+User-agent: *
+Allow: /
+
+# Block access to admin and private areas
+Disallow: /admin/
+Disallow: /private/
+Disallow: /_next/
+Disallow: /api/*
+Disallow: /*?*  # Block URLs with query parameters
+Disallow: /*preview=true  # Block preview URLs
+
+# Block specific file types
+Disallow: /*.json$
+Disallow: /*.txt$
+
+# Allow specific bots more access
+User-agent: Googlebot
+Allow: /*.json$  # Allow Googlebot to access JSON-LD
+Allow: /*.xml$   # Allow Googlebot to access XML
+
+User-agent: Googlebot-Image
+Allow: /images/
+Allow: /*.jpg$
+Allow: /*.jpeg$
+Allow: /*.gif$
+Allow: /*.png$
+Allow: /*.webp$
+
+# Rate limiting
+Crawl-delay: 1
+
+# Sitemaps
+Sitemap: https://omnipixel.io/sitemap.xml
+Sitemap: https://omnipixel.io/static-sitemap.xml
+Sitemap: https://omnipixel.io/projects-sitemap.xml
+Sitemap: https://omnipixel.io/services-sitemap.xml
+Sitemap: https://omnipixel.io/products-sitemap.xml
+
+# Host
+Host: https://omnipixel.io

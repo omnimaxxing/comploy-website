@@ -1,0 +1,60 @@
+# Node dependencies
+node_modules/
+.node_modules/
+
+
+src/payload-types.ts
+
+# Payload auto-generated types
+src/payload-types.ts
+# IDE settings
+.idea/
+.vscode/
+
+# Next.js build output
+.next/
+
+# Sentry Config File
+.env.sentry-build-plugin
+
+
+/src/payload-types.ts
+
+supabase/
+# Vercel deployment
+.vercel
+
+# Sentry Config File
+.env.sentry-build-plugin
+
+# IDE settings
+.idea/
+.vscode/
+
+# Husky Git Hooks
+.husky/
+
+# Added by Claude Task Master
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dev-debug.log
+# Dependency directories
+# Environment variables
+.env
+# Editor directories and files
+.idea
+.vscode
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+# OS specific
+.DS_Store
+# Task files
+tasks.json
+tasks/ 
